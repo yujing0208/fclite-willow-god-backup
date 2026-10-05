@@ -10,8 +10,8 @@ debug: false
 #   article_count: 每个站点最多抓取的文章数量
 spider_settings:
   enable: true
-  json_url: "https://blog.liushen.fun/friend.json"
-  article_count: 5
+  json_url: "https://yujingblog.top/friend.json"
+  article_count: 10
 
 # 代理配置
 # 说明：用于友链检测和 RSS 抓取。程序会先直连，请求失败且配置了代理时自动走代理。
@@ -51,7 +51,7 @@ link_check:
   max_workers: 10
   status_api_url: "https://v2.xxapi.cn/api/status?url={url}"
   enable_backlink_check: true
-  author_url: "blog.liushen.fun"
+  author_url: "yujingblog.top"
 
 # 邮件推送功能配置，暂未实现，等待后续开发
 # 说明：每次运行后向指定邮箱推送所有友链文章更新。
@@ -64,13 +64,13 @@ email_push:
 # 邮件 issue 订阅功能配置
 # 说明：从 GitHub issue 中提取订阅邮箱，并推送你自己站点的新文章。
 rss_subscribe:
-  enable: true
-  github_username: willow-god
+  enable: false
+  github_username: yujing0208
   github_repo: Friend-Circle-Lite
-  your_blog_url: https://blog.liushen.fun/
+  your_blog_url: https://yujingblog.top/
   email_template: "./push_templates/default.html"
   website_info:
-    title: "清羽飞扬"
+    title: "余京的小站"
 
 # SMTP 配置
 # 说明：用于上方邮件相关功能。如果不使用邮件功能，可关闭 email_push 和 rss_subscribe。
