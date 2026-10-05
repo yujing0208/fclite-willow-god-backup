@@ -345,14 +345,13 @@ class LinkReachabilityService:
                 "http://www." + host,
                 "//www." + host,
             })
+        import re as _re
         for variant in variants:
-            if (
-                f'href="{variant}"' in content
-                or f"href='{variant}'" in content
-                or f'href="{variant}/"' in content
-                or f"href='{variant}/'" in content
-                or variant in content
-            ):
+            # 精确匹配 <a ... href="variant"> 或 <a ... href=variant>，
+            # 排除 data-href / x-href 等非标准属性。
+            pattern = rf'<a\b[^>]*\bhref\s*=\s*["\']?{_re.escape(variant)}["\']?'
+            if _re.search(pattern, content, _re.IGNORECASE):
+                return True
                 return True
         # 走到了这里说明没匹配到自己的域名。但页面压根没渲染出友链列表
         # （SPA / 重定向壳）时，「没匹配到」并不等于「对方没放我的链接」——
