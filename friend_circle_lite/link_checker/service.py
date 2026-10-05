@@ -164,8 +164,10 @@ class LinkReachabilityService:
             record = self._compose_non_rss_record(website, cached, homepage, api)
 
         if record.reachable and self.config.enable_backlink_check and self.config.author_url and website.linkpage:
-            record.backlink_checked = True
-            record.has_author_link = self._check_author_link_in_page(session, website.linkpage)
+            backlink = self._check_author_link_in_page(session, website.linkpage)
+            # 页面没抓到 -> 记为「未检测」（has_backlink=null），不冤枉成「无反链」
+            record.backlink_checked = backlink is not None
+            record.has_author_link = bool(backlink)
         elif not record.reachable:
             record.backlink_checked = bool(website.linkpage)
             record.has_author_link = False
@@ -301,12 +303,21 @@ class LinkReachabilityService:
             api=api,
         )
 
-    def _check_author_link_in_page(self, session: requests.Session, linkpage_url: str) -> bool:
+    def _check_author_link_in_page(self, session: requests.Session, linkpage_url: str) -> bool | None:
+        # 返回 True/False = 检测成功；返回 None = 页面没抓到（应记为「未检测」，不是「无反链」）
         fetcher = self.fetcher or WebFetchClient(session, self.proxy_settings)
         result = fetcher.get(linkpage_url, headers=RAW_HEADERS, timeout=self.config.timeout, desc="友链页面检测")
         response = result.response
         if response is None:
-            return False
+            return None
+        try:
+            if int(getattr(response, "status_code", 200) or 200) >= 400:
+                return None
+        except (TypeError, ValueError):
+            pass
+        content = response.text
+        if not content:
+            return None
 
         author_url = self.config.author_url
         if not author_url.startswith(("http://", "https://")):
@@ -322,7 +333,15 @@ class LinkReachabilityService:
             "https://" + self.config.author_url,
             "http://" + self.config.author_url,
         }
-        content = response.text
+        # 补 www. 变体：上游只覆盖裸域，友链里写 https://www.xxxx 时会漏判
+        host = author_url.replace("https://", "").replace("http://", "").rstrip("/")
+        if host and not host.startswith("www."):
+            variants.update({
+                "www." + host,
+                "https://www." + host,
+                "http://www." + host,
+                "//www." + host,
+            })
         for variant in variants:
             if (
                 f'href="{variant}"' in content
