@@ -47,6 +47,8 @@ LINK_CHECK_HEADERS = {
     "X-Friend-Circle-Link-Check": "1.0",
 }
 
+MIN_FRIEND_HOSTS_FOR_BACKLINK = 8  # 友链页至少要渲染出这么多外链域名，否则认为是 SPA/跳转壳
+
 RAW_HEADERS = {
     "User-Agent": LINK_CHECK_HEADERS["User-Agent"],
     "X-Friend-Circle-Link-Check": "1.0",
@@ -319,6 +321,25 @@ class LinkReachabilityService:
         if not content:
             return None
 
+        # 页面没渲染出友链列表（SPA / 重定向壳 / 只塞了一个跳转链接）时判定不了，
+        # 记为「未检测」(None)，不能冤枉成「无反链」。
+        seen_hosts = set()
+        lowered = content.lower()
+        for marker in ('href="https://', "href='https://", 'href="http://', "href='http://"):
+            cursor = 0
+            while True:
+                idx = lowered.find(marker, cursor)
+                if idx < 0:
+                    break
+                rest = lowered[idx + len(marker):]
+                host = rest.split("/")[0].split('"')[0].split("'")[0].strip()
+                if host:
+                    seen_hosts.add(host)
+                cursor = idx + len(marker)
+        if len(seen_hosts) < MIN_FRIEND_HOSTS_FOR_BACKLINK:
+            logging.info(f"友链页面只渲染出 {len(seen_hosts)} 个外链域名，判为「未检测」: {linkpage_url}")
+            return None
+
         author_url = self.config.author_url
         if not author_url.startswith(("http://", "https://")):
             author_url = "https://" + author_url
@@ -385,8 +406,14 @@ class LinkReachabilityService:
         with requests.Session() as session:
             self.fetcher = self.fetcher or WebFetchClient(session, self.proxy_settings)
             for website, record in items:
-                record.backlink_checked = True
-                record.has_author_link = self._check_author_link_in_page(session, website.linkpage)
+                # 没配友链页 / 页面抓不到 -> 「未检测」(None)，不能冤枉成「无反链」
+                if not website.linkpage:
+                    record.backlink_checked = False
+                    record.has_author_link = False
+                    continue
+                backlink = self._check_author_link_in_page(session, website.linkpage)
+                record.backlink_checked = backlink is not None
+                record.has_author_link = bool(backlink)
             self.store.save_records([record for _, record in items])
 
     def _build_failed_record(self, website: Website, cached: LinkCheckRecord | None) -> LinkCheckRecord:
