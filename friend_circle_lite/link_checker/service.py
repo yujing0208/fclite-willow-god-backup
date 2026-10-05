@@ -321,24 +321,6 @@ class LinkReachabilityService:
         if not content:
             return None
 
-        # 页面没渲染出友链列表（SPA / 重定向壳 / 只塞了一个跳转链接）时判定不了，
-        # 记为「未检测」(None)，不能冤枉成「无反链」。
-        seen_hosts = set()
-        lowered = content.lower()
-        for marker in ('href="https://', "href='https://", 'href="http://', "href='http://"):
-            cursor = 0
-            while True:
-                idx = lowered.find(marker, cursor)
-                if idx < 0:
-                    break
-                rest = lowered[idx + len(marker):]
-                host = rest.split("/")[0].split('"')[0].split("'")[0].strip()
-                if host:
-                    seen_hosts.add(host)
-                cursor = idx + len(marker)
-        if len(seen_hosts) < MIN_FRIEND_HOSTS_FOR_BACKLINK:
-            logging.info(f"友链页面只渲染出 {len(seen_hosts)} 个外链域名，判为「未检测」: {linkpage_url}")
-            return None
 
         author_url = self.config.author_url
         if not author_url.startswith(("http://", "https://")):
@@ -372,6 +354,26 @@ class LinkReachabilityService:
                 or variant in content
             ):
                 return True
+        # 走到了这里说明没匹配到自己的域名。但页面压根没渲染出友链列表
+        # （SPA / 重定向壳）时，「没匹配到」并不等于「对方没放我的链接」——
+        # 记为「未检测」(None)，不冤枉成「无反链」。
+        seen_hosts = set()
+        lowered = content.lower()
+        for marker in ('href="https://', "href='https://", 'href="http://', "href='http://"):
+            cursor = 0
+            while True:
+                idx = lowered.find(marker, cursor)
+                if idx < 0:
+                    break
+                rest = lowered[idx + len(marker):]
+                host = rest.split("/")[0].split('"')[0].split("'")[0].strip()
+                if host:
+                    seen_hosts.add(host)
+                cursor = idx + len(marker)
+        if len(seen_hosts) < MIN_FRIEND_HOSTS_FOR_BACKLINK:
+            logging.info(f"友链页只渲染出 {len(seen_hosts)} 个外链域名，判为「未检测」: {linkpage_url}")
+            return None
+
         return False
 
     def _can_reuse_cached_record(self, cached: LinkCheckRecord, website: Website) -> bool:
