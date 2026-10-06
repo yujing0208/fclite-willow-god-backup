@@ -47,8 +47,6 @@ LINK_CHECK_HEADERS = {
     "X-Friend-Circle-Link-Check": "1.0",
 }
 
-MIN_FRIEND_HOSTS_FOR_BACKLINK = 8  # 友链页至少要渲染出这么多外链域名，否则认为是 SPA/跳转壳
-
 RAW_HEADERS = {
     "User-Agent": LINK_CHECK_HEADERS["User-Agent"],
     "X-Friend-Circle-Link-Check": "1.0",
@@ -166,10 +164,8 @@ class LinkReachabilityService:
             record = self._compose_non_rss_record(website, cached, homepage, api)
 
         if record.reachable and self.config.enable_backlink_check and self.config.author_url and website.linkpage:
-            backlink = self._check_author_link_in_page(session, website.linkpage)
-            # 页面没抓到 -> 记为「未检测」（has_backlink=null），不冤枉成「无反链」
-            record.backlink_checked = backlink is not None
-            record.has_author_link = bool(backlink)
+            record.backlink_checked = True
+            record.has_author_link = self._check_author_link_in_page(session, website.linkpage)
         elif not record.reachable:
             record.backlink_checked = bool(website.linkpage)
             record.has_author_link = False
@@ -305,22 +301,12 @@ class LinkReachabilityService:
             api=api,
         )
 
-    def _check_author_link_in_page(self, session: requests.Session, linkpage_url: str) -> bool | None:
-        # 返回 True/False = 检测成功；返回 None = 页面没抓到（应记为「未检测」，不是「无反链」）
+    def _check_author_link_in_page(self, session: requests.Session, linkpage_url: str) -> bool:
         fetcher = self.fetcher or WebFetchClient(session, self.proxy_settings)
         result = fetcher.get(linkpage_url, headers=RAW_HEADERS, timeout=self.config.timeout, desc="友链页面检测")
         response = result.response
         if response is None:
-            return None
-        try:
-            if int(getattr(response, "status_code", 200) or 200) >= 400:
-                return None
-        except (TypeError, ValueError):
-            pass
-        content = response.text
-        if not content:
-            return None
-
+            return False
 
         author_url = self.config.author_url
         if not author_url.startswith(("http://", "https://")):
@@ -336,43 +322,16 @@ class LinkReachabilityService:
             "https://" + self.config.author_url,
             "http://" + self.config.author_url,
         }
-        # 补 www. 变体：上游只覆盖裸域，友链里写 https://www.xxxx 时会漏判
-        host = author_url.replace("https://", "").replace("http://", "").rstrip("/")
-        if host and not host.startswith("www."):
-            variants.update({
-                "www." + host,
-                "https://www." + host,
-                "http://www." + host,
-                "//www." + host,
-            })
-        import re as _re
+        content = response.text
         for variant in variants:
-            # 精确匹配 <a ... href="variant"> 或 <a ... href=variant>，
-            # 排除 data-href / x-href 等非标准属性。
-            pattern = rf'<a\b[^>]*\bhref\s*=\s*["\']?{_re.escape(variant)}["\']?'
-            if _re.search(pattern, content, _re.IGNORECASE):
+            if (
+                f'href="{variant}"' in content
+                or f"href='{variant}'" in content
+                or f'href="{variant}/"' in content
+                or f"href='{variant}/'" in content
+                or variant in content
+            ):
                 return True
-                return True
-        # 走到了这里说明没匹配到自己的域名。但页面压根没渲染出友链列表
-        # （SPA / 重定向壳）时，「没匹配到」并不等于「对方没放我的链接」——
-        # 记为「未检测」(None)，不冤枉成「无反链」。
-        seen_hosts = set()
-        lowered = content.lower()
-        for marker in ('href="https://', "href='https://", 'href="http://', "href='http://"):
-            cursor = 0
-            while True:
-                idx = lowered.find(marker, cursor)
-                if idx < 0:
-                    break
-                rest = lowered[idx + len(marker):]
-                host = rest.split("/")[0].split('"')[0].split("'")[0].strip()
-                if host:
-                    seen_hosts.add(host)
-                cursor = idx + len(marker)
-        if len(seen_hosts) < MIN_FRIEND_HOSTS_FOR_BACKLINK:
-            logging.info(f"友链页只渲染出 {len(seen_hosts)} 个外链域名，判为「未检测」: {linkpage_url}")
-            return None
-
         return False
 
     def _can_reuse_cached_record(self, cached: LinkCheckRecord, website: Website) -> bool:
@@ -407,14 +366,8 @@ class LinkReachabilityService:
         with requests.Session() as session:
             self.fetcher = self.fetcher or WebFetchClient(session, self.proxy_settings)
             for website, record in items:
-                # 没配友链页 / 页面抓不到 -> 「未检测」(None)，不能冤枉成「无反链」
-                if not website.linkpage:
-                    record.backlink_checked = False
-                    record.has_author_link = False
-                    continue
-                backlink = self._check_author_link_in_page(session, website.linkpage)
-                record.backlink_checked = backlink is not None
-                record.has_author_link = bool(backlink)
+                record.backlink_checked = True
+                record.has_author_link = self._check_author_link_in_page(session, website.linkpage)
             self.store.save_records([record for _, record in items])
 
     def _build_failed_record(self, website: Website, cached: LinkCheckRecord | None) -> LinkCheckRecord:
